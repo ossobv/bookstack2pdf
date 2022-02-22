@@ -1,0 +1,179 @@
+#!/bin/sh
+set -eu
+
+case ${LANG:-} in
+nl)
+    TEXT_CONFIDENTIAL=VERTROUWELIJK
+    TEXT_RECIPIENTS=Distributielijst
+    TEXT_TABLEOFCONTENTS=Inhoudsopgave
+    ;;
+*)
+    TEXT_CONFIDENTIAL=CONFIDENTIAL
+    TEXT_RECIPIENTS=Recipients
+    TEXT_TABLEOFCONTENTS='Table of Contents'
+    ;;
+esac
+
+make_style_css() {
+    # This uses the fonts we found in the source.html we looked at.
+    cat <<EOF
+h1, h2, body {
+    font-family: "DejaVu Sans", "Ubuntu", "Roboto", sans-serif;
+    font-weight: normal;
+}
+h1 { font-size: 2.5em; }
+h2 { font-size: 1.6em; }
+h3 { font-size: 1.3em; }
+h4 { font-size: 1.2em; }
+h5 { font-size: 1.1em; }
+p { font-size: 1em; }
+EOF
+}
+
+
+make_cover_html() {
+    local title="$1"
+    local subtitle="$2"
+    local author="$3"
+    local recipients="$4"
+    cat <<EOF
+<!doctype html>
+<html lang="en-GB">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+    <title>$title</title>
+</head>
+<body>
+    <h1>$title</h1>
+    <h2 style="color:#800;font-weight:bold;">$subtitle</h2>
+    <h3>$author</h3>
+    <pre>$TEXT_RECIPIENTS:
+$recipients</pre>
+</body>
+</html>
+EOF
+}
+
+
+make_toc_xsl() {
+    # Dump xsl for TOC, hide H4/H5, replace TOC name with Dutch:
+    wkhtmltopdf --dump-default-toc-xsl | sed -e "
+        /<style>/aul ul ul { display: none; /* limit TOC to H1..3 */ }
+
+        # Replace <h1> 'Table of Contents' with 'Inhoudsopgave'
+        s@<h1>[^<]*</h1>@<h1>$TEXT_TABLEOFCONTENTS</h1>@
+    "
+}
+
+
+get_title() {
+    # The heading looks like this:
+    # <h1 style="font-size: 4.8em">The Heading</h1>
+    sed -e '/<h1/!d;s@.*<h1[^>]*>@@;s@<.*@@' | head -n1
+}
+
+
+get_metadata() {
+    # We have embedded metadata, like <version>..</version>.
+    # However, this is HTML-encoded.
+    local key="$1"
+    sed -e "
+        # From <key> to </key>
+        /&lt;$key&gt;/,/&lt;\\/$key&gt;/!d
+
+        # Remove leading and trailing and stop after </key>
+        # (necessary for single-line data).
+        s/.*&lt;$key&gt;//
+        /&lt;\\/$key&gt;.*/{s/&lt;\\/$key&gt;.*//;q}
+    "
+}
+
+
+get_first_page() {
+    # The first page starts with <body> and then:
+    # <div class="page-content">
+    # ...
+    # <div class="page-break"></div>
+    sed -e '
+        /<div class="page-content">/,/<div class="page-break">/!d
+        /<div class="page-content">/d
+        /<div class="page-break">/d
+    '
+}
+
+
+get_without_first_page() {
+    # The first page starts with <body> and then:
+    # <div class="page-content">
+    # ...
+    # <div class="page-break"></div>
+    # We want to cut out that, except the <div class="page-content">.
+    sed -e '
+        /<div class="page-content">/,/<div class="page-break">/d
+        /<body>/a<div class="page-content">
+    '
+}
+
+
+if test "${1:-}" = "-"; then
+    SOURCE=$(cat)
+elif ! test -f "${1:-}"; then
+   echo "Usage: $0 SOURCE.html OUTPUT.pdf -- source not found" >&2
+    exit 1
+elif test "${1##*.}" != "html"; then
+   echo "Usage: $0 SOURCE.html OUTPUT.pdf -- source not in html format" >&2
+    exit 1
+else
+    SOURCE=$(cat "$1")
+fi
+OUTPUT=${2:-}
+if test "${OUTPUT##*.}" != "pdf"; then
+    echo "Usage: $0 SOURCE.html OUTPUT.pdf -- output should end in pdf" >&2
+    exit 1
+fi
+if test -e "$OUTPUT"; then
+    echo "Usage: $0 SOURCE.html OUTPUT.pdf -- output exists already" >&2
+    exit 1
+fi
+
+FIRST_PAGE=$(printf '%s' "$SOURCE" | get_first_page)
+OTHER_PAGES=$(printf '%s' "$SOURCE" | get_without_first_page)
+
+TITLE=$(printf '%s' "$FIRST_PAGE" | get_title)
+AUTHOR=$(printf '%s' "$FIRST_PAGE" | get_metadata author)
+VERSION=$(printf '%s' "$FIRST_PAGE" | get_metadata version)
+RECIPIENTS=$(printf '%s' "$FIRST_PAGE" | get_metadata recipients)
+
+# Make temp file locations:
+TMPDIR=$(mktemp --tmpdir=$(dirname "$0") --directory)
+trap "rm -vr '$TMPDIR'" EXIT
+TMP_SOURCE="$TMPDIR/source.html"
+TMP_COVER="$TMPDIR/cover.html"
+TMP_STYLE="$TMPDIR/style.css"
+TMP_TOCXSL="$TMPDIR/toc.xsl"
+TMP_OUTPUT="$TMPDIR/output.pdf"
+
+# Write temp files:
+make_style_css >"$TMP_STYLE"
+make_cover_html "$TITLE" "$TEXT_CONFIDENTIAL" "$AUTHOR" "$RECIPIENTS" \
+    >"$TMP_COVER"
+make_toc_xsl >"$TMP_TOCXSL"
+printf '%s' "$OTHER_PAGES" >"$TMP_SOURCE"
+
+# Get to actual work:
+wkhtmltopdf \
+    --title "$TITLE" \
+    --page-size A4 \
+    --disable-external-links \
+    --disable-javascript \
+    --user-style-sheet style.css \
+    --footer-font-name 'DejaVu Sans' \
+    --footer-font-size 8 \
+    --footer-spacing 5 \
+    --footer-left "$TEXT_CONFIDENTIAL - $TITLE - $VERSION - $AUTHOR" \
+    --footer-right '[page]/[topage]' \
+    cover "$TMP_COVER" \
+    toc --xsl-style-sheet "$TMP_TOCXSL" \
+    "$TMP_SOURCE" \
+    "$TMP_OUTPUT"
+mv "$TMP_OUTPUT" "$OUTPUT"
