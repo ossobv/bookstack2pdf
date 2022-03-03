@@ -4,12 +4,10 @@ set -eu
 case ${LANG:-} in
 nl)
     TEXT_CONFIDENTIAL=VERTROUWELIJK
-    TEXT_RECIPIENTS=Distributielijst
     TEXT_TABLEOFCONTENTS=Inhoudsopgave
     ;;
 *)
     TEXT_CONFIDENTIAL=CONFIDENTIAL
-    TEXT_RECIPIENTS=Recipients
     TEXT_TABLEOFCONTENTS='Table of Contents'
     ;;
 esac
@@ -19,14 +17,23 @@ make_style_css() {
     cat <<EOF
 h1, h2, body {
     font-family: "DejaVu Sans", "Ubuntu", "Roboto", sans-serif;
-    font-weight: normal;
 }
-h1 { font-size: 2.5em; }
-h2 { font-size: 1.6em; }
-h3 { font-size: 1.3em; }
-h4 { font-size: 1.2em; }
-h5 { font-size: 1.1em; }
-p { font-size: 1em; }
+h1 { font-size: 1.8em !important; font-weight: bold !important; }
+h2 { font-size: 1.4em !important; font-weight: bold !important; }
+h3 { font-size: 1.3em !important; font-weight: normal !important; }
+h4 { font-size: 1.2em !important; font-weight: normal !important; }
+h5 { font-size: 1.1em !important; font-weight: normal !important; }
+p { font-size: 1em !important; }
+strong, em, a, b, i { margin: 0 0.1em 0 0.4em; } /* avoid "onderToegang" */
+pre {
+    font-family: "Lucida Console", "DejaVu Sans Mono", "Ubuntu Mono",
+      Monaco, monospace;
+}
+
+/* Front page only */
+#cover h1 { font-size: 3em !important; font-weight: bold !important; }
+#cover h2 { font-size: 2em !important; font-weight: bold !important; color: #800; }
+#cover h3 { font-size: 1.8em !important; font-weight: bold !important; }
 EOF
 }
 
@@ -35,7 +42,7 @@ make_cover_html() {
     local title="$1"
     local subtitle="$2"
     local author="$3"
-    local recipients="$4"
+    local front_notes="$4"
     cat <<EOF
 <!doctype html>
 <html lang="en-GB">
@@ -43,12 +50,11 @@ make_cover_html() {
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
     <title>$title</title>
 </head>
-<body>
+<body id="cover">
     <h1>$title</h1>
-    <h2 style="color:#800;font-weight:bold;">$subtitle</h2>
+    <h2>$subtitle</h2>
     <h3>$author</h3>
-    <pre>$TEXT_RECIPIENTS:
-$recipients</pre>
+    <pre>$front_notes</pre>
 </body>
 </html>
 EOF
@@ -142,7 +148,7 @@ OTHER_PAGES=$(printf '%s' "$SOURCE" | get_without_first_page)
 TITLE=$(printf '%s' "$FIRST_PAGE" | get_title)
 AUTHOR=$(printf '%s' "$FIRST_PAGE" | get_metadata author)
 VERSION=$(printf '%s' "$FIRST_PAGE" | get_metadata version)
-RECIPIENTS=$(printf '%s' "$FIRST_PAGE" | get_metadata recipients)
+FRONT_NOTES=$(printf '%s' "$FIRST_PAGE" | get_metadata front_notes)
 
 # Make temp file locations:
 TMPDIR=$(mktemp --tmpdir=$(dirname "$0") --directory)
@@ -155,7 +161,7 @@ TMP_OUTPUT="$TMPDIR/output.pdf"
 
 # Write temp files:
 make_style_css >"$TMP_STYLE"
-make_cover_html "$TITLE" "$TEXT_CONFIDENTIAL" "$AUTHOR" "$RECIPIENTS" \
+make_cover_html "$TITLE" "$TEXT_CONFIDENTIAL" "$AUTHOR" "$FRONT_NOTES" \
     >"$TMP_COVER"
 make_toc_xsl >"$TMP_TOCXSL"
 printf '%s' "$OTHER_PAGES" >"$TMP_SOURCE"
@@ -166,7 +172,7 @@ wkhtmltopdf \
     --page-size A4 \
     --disable-external-links \
     --disable-javascript \
-    --user-style-sheet style.css \
+    --user-style-sheet "$TMP_STYLE" \
     --footer-font-name 'DejaVu Sans' \
     --footer-font-size 8 \
     --footer-spacing 5 \

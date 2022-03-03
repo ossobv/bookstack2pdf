@@ -9,8 +9,9 @@ Add the following to the book base ``description``::
     <comment>See https://github.com/ossobv/bookstack2pdf</comment>
     <version>v1.1 (22-feb-2022)</version>
     <author>John Doe</author>
-    <recipients>- v1.1 (recipientX, recipientY)</recipients>
-    - v1.0 (recipientX)</recipients>
+    <front_notes>Recipients:
+    - v1.1 (recipientX, recipientY)
+    - v1.0 (recipientX)</front_notes>
 
 Then, export the `BookStack book <https://www.bookstackapp.com/>`_ book
 as a **Contained Web File (.html)**.
