@@ -23,15 +23,12 @@ _bookstack2pdf_init() {
 make_style_css() {
     # This uses the fonts we found in the source.html we looked at.
     cat <<EOF
-h1, h2, body {
+/*h1, h2, h3, h4, h5, body, p, li, div, span {*/
+* {
     font-family: "DejaVu Sans", "Ubuntu", "Roboto", sans-serif;
+    /* for some reason, the non-ToC font is significantly smalle ?? */
+    font-size: 24px;
 }
-h1 { font-size: 1.8em !important; font-weight: bold !important; }
-h2 { font-size: 1.4em !important; font-weight: bold !important; }
-h3 { font-size: 1.3em !important; font-weight: normal !important; }
-h4 { font-size: 1.2em !important; font-weight: normal !important; }
-h5 { font-size: 1.1em !important; font-weight: normal !important; }
-p { font-size: 1em !important; }
 strong, em, a, b, i { margin: 0 0.1em 0 0.4em; } /* avoid "onderToegang" */
 pre {
     font-family: "Lucida Console", "DejaVu Sans Mono", "Ubuntu Mono",
@@ -39,9 +36,9 @@ pre {
 }
 
 /* Front page only */
-#cover h1 { font-size: 3em !important; font-weight: bold !important; }
-#cover h2 { font-size: 2em !important; font-weight: bold !important; color: #800; }
-#cover h3 { font-size: 1.8em !important; font-weight: bold !important; }
+#cover h1 { font-size: 40pt !important; font-weight: bold !important; }
+#cover h2 { font-size: 30pt !important; font-weight: bold !important; color: #800; }
+#cover h3 { font-size: 20pt !important; font-weight: bold !important; }
 EOF
 }
 
@@ -70,13 +67,105 @@ EOF
 
 
 make_toc_xsl() {
-    # Dump xsl for TOC, hide H4/H5, replace TOC name with Dutch:
-    wkhtmltopdf --dump-default-toc-xsl | sed -e "
-        /<style>/aul ul ul { display: none; /* limit TOC to H1..3 */ }
+    # Create custom XLS, not very much different from:
+    #   wkhtmltopdf --dump-default-toc-xsl
+    # But use XSLT to limit the depth.
+    # An alternative is to use:
+    #   <style>ul ul ul{ display: none; }</style>
+    # But that is awkward to get the amount of ul's right..
+    local maxdepth=1  # h1..h2
 
-        # Replace <h1> 'Table of Contents' with 'Inhoudsopgave'
-        s@<h1>[^<]*</h1>@<h1>$TEXT_TABLEOFCONTENTS</h1>@
-    "
+    # See also: --toc-header-text
+    local toc_title="$TEXT_TABLEOFCONTENTS"
+
+    cat <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<xsl:stylesheet version="1.1"
+                xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
+                xmlns:outline="http://wkhtmltopdf.org/outline"
+                xmlns:xs="http://www.w3.org/2001/XMLSchema"
+                xmlns="http://www.w3.org/1999/xhtml">
+  <xsl:output doctype-public="-//W3C//DTD XHTML 1.0 Strict//EN"
+              doctype-system="http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd"
+              indent="yes" />
+  <xsl:template match="outline:outline">
+    <html>
+      <head>
+        <title>$toc_title</title>
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+        <style>
+          /*h1, h2, h3, h4, h5, body, p, li, div, span {*/
+          * {
+            font-family: "DejaVu Sans", "Ubuntu", "Roboto", sans-serif;
+            /* this font is much larger than the body font?? */
+            font-size: 16px;
+          }
+          h1 {
+            text-align: center;
+            font-size: 20pt;
+          }
+          /* See also: --disable-dotted-lines */
+          div {border-bottom: 1px dashed rgb(200,200,200);margin-bottom:0.3em;}
+          span {float: right;}
+          li {list-style: none;}
+          /*ul {
+            font-family: arial;
+          }*/
+          /* See also: --toc-text-size-shrink */
+          /*ul ul { font-size: 80%; }*/
+          ul { padding-left: 0em; }
+          /* See also: --toc-level-indentation */
+          /*ul ul { padding-left: 1em;}*/
+          a { text-decoration:none; color: black; }
+          /* cannot get .depth[N] class matching to work?? */
+          div { line-height: 1; }
+          ul li div { margin-left: 0em; }
+          ul li ul li div { margin-left: 2em; font-size: 80%; }
+          ul li ul li ul li div { margin-left: 4em; font-size: 60%; }
+        </style>
+      </head>
+      <body>
+        <h1>$toc_title</h1>
+        <!-- dive into the second outline:item and set depth=1 -->
+        <ul>
+          <xsl:apply-templates select="outline:item/outline:item">
+            <xsl:with-param name="depth" select="1" as="xs:integer"/>
+          </xsl:apply-templates>
+        </ul>
+      </body>
+    </html>
+  </xsl:template>
+  <xsl:template match="outline:item">
+    <xsl:param name="depth"/>
+    <li>
+      <xsl:attribute name="class">depth<xsl:value-of select="\$depth"/></xsl:attribute>
+      <xsl:if test="@title!=''">
+        <div>
+          <a>
+            <xsl:if test="@link">
+              <xsl:attribute name="href"><xsl:value-of select="@link"/></xsl:attribute>
+            </xsl:if>
+            <xsl:if test="@backLink">
+              <xsl:attribute name="name"><xsl:value-of select="@backLink"/></xsl:attribute>
+            </xsl:if>
+            <xsl:value-of select="@title" />
+          </a>
+          <span> <xsl:value-of select="@page" /> </span>
+        </div>
+      </xsl:if>
+      <!-- limit ToC here to depth < N using lt because we haven't incremented yet -->
+      <xsl:if test="\$depth &lt; $maxdepth">
+        <ul>
+          <xsl:comment>added to prevent self-closing tags in QtXmlPatterns</xsl:comment>
+          <xsl:apply-templates select="outline:item">
+            <xsl:with-param name="depth" select="\$depth + 1" as="xs:integer"/>
+          </xsl:apply-templates>
+        </ul>
+      </xsl:if>
+    </li>
+  </xsl:template>
+</xsl:stylesheet>
+EOF
 }
 
 
@@ -176,12 +265,16 @@ _bookstack2pdf_main() {
     printf '%s' "$OTHER_PAGES" >"$TMP_SOURCE"
 
     # Get to actual work:
+    # (--dpi affects underline dashes at least..)
     wkhtmltopdf \
         --title "$TITLE" \
         --page-size A4 \
+        --dpi 96 \
         --disable-external-links \
         --disable-javascript \
         --user-style-sheet "$TMP_STYLE" \
+        --header-font-name 'DejaVu Sans' \
+        --header-font-size 8 \
         --footer-font-name 'DejaVu Sans' \
         --footer-font-size 8 \
         --footer-spacing 5 \
