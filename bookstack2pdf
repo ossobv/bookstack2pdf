@@ -1,16 +1,24 @@
 #!/bin/sh
-set -eu
 
-case ${LANG:-} in
-nl)
-    TEXT_CONFIDENTIAL=VERTROUWELIJK
-    TEXT_TABLEOFCONTENTS=Inhoudsopgave
-    ;;
-*)
-    TEXT_CONFIDENTIAL=CONFIDENTIAL
-    TEXT_TABLEOFCONTENTS='Table of Contents'
-    ;;
-esac
+
+_bookstack2pdf_init() {
+    # Don't do this in the globals. Do this first when we're running main().
+    set -eu
+
+    case ${LANG:-} in
+    nl)
+        LANG=nl-NL
+        TEXT_CONFIDENTIAL=VERTROUWELIJK
+        TEXT_TABLEOFCONTENTS=Inhoudsopgave
+        ;;
+    *)
+        LANG=en-GB
+        TEXT_CONFIDENTIAL=CONFIDENTIAL
+        TEXT_TABLEOFCONTENTS='Table of Contents'
+        ;;
+    esac
+}
+
 
 make_style_css() {
     # This uses the fonts we found in the source.html we looked at.
@@ -45,7 +53,7 @@ make_cover_html() {
     local front_notes="$4"
     cat <<EOF
 <!doctype html>
-<html lang="en-GB">
+<html lang="$LANG">
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
     <title>$title</title>
@@ -121,65 +129,80 @@ get_without_first_page() {
 }
 
 
-if test "${1:-}" = "-"; then
-    SOURCE=$(cat)
-elif ! test -f "${1:-}"; then
-   echo "Usage: $0 SOURCE.html OUTPUT.pdf -- source not found" >&2
-    exit 1
-elif test "${1##*.}" != "html"; then
-   echo "Usage: $0 SOURCE.html OUTPUT.pdf -- source not in html format" >&2
-    exit 1
-else
-    SOURCE=$(cat "$1")
-fi
-OUTPUT=${2:-}
-if test "${OUTPUT##*.}" != "pdf"; then
-    echo "Usage: $0 SOURCE.html OUTPUT.pdf -- output should end in pdf" >&2
-    exit 1
-fi
-if test -e "$OUTPUT"; then
-    echo "Usage: $0 SOURCE.html OUTPUT.pdf -- output exists already" >&2
-    exit 1
-fi
+_bookstack2pdf_main() {
+    if test "${1:-}" = "-"; then
+        SOURCE=$(cat)
+    elif ! test -f "${1:-}"; then
+       echo "Usage: $0 SOURCE.html OUTPUT.pdf -- source not found" >&2
+        exit 1
+    elif test "${1##*.}" != "html"; then
+       echo "Usage: $0 SOURCE.html OUTPUT.pdf -- source not in html format" >&2
+        exit 1
+    else
+        SOURCE=$(cat "$1")
+    fi
+    OUTPUT=${2:-}
+    if test "${OUTPUT##*.}" != "pdf"; then
+        echo "Usage: $0 SOURCE.html OUTPUT.pdf -- output should end in pdf" >&2
+        exit 1
+    fi
+    if test -e "$OUTPUT"; then
+        echo "Usage: $0 SOURCE.html OUTPUT.pdf -- output exists already" >&2
+        exit 1
+    fi
 
-FIRST_PAGE=$(printf '%s' "$SOURCE" | get_first_page)
-OTHER_PAGES=$(printf '%s' "$SOURCE" | get_without_first_page)
+    FIRST_PAGE=$(printf '%s' "$SOURCE" | get_first_page)
+    OTHER_PAGES=$(printf '%s' "$SOURCE" | get_without_first_page)
 
-TITLE=$(printf '%s' "$FIRST_PAGE" | get_title)
-AUTHOR=$(printf '%s' "$FIRST_PAGE" | get_metadata author)
-VERSION=$(printf '%s' "$FIRST_PAGE" | get_metadata version)
-FRONT_NOTES=$(printf '%s' "$FIRST_PAGE" | get_metadata front_notes)
+    TITLE=$(printf '%s' "$FIRST_PAGE" | get_title)
+    AUTHOR=$(printf '%s' "$FIRST_PAGE" | get_metadata author)
+    VERSION=$(printf '%s' "$FIRST_PAGE" | get_metadata version)
+    FRONT_NOTES=$(printf '%s' "$FIRST_PAGE" | get_metadata front_notes)
 
-# Make temp file locations:
-TMPDIR=$(mktemp --tmpdir=$(dirname "$0") --directory)
-trap "rm -vr '$TMPDIR'" EXIT
-TMP_SOURCE="$TMPDIR/source.html"
-TMP_COVER="$TMPDIR/cover.html"
-TMP_STYLE="$TMPDIR/style.css"
-TMP_TOCXSL="$TMPDIR/toc.xsl"
-TMP_OUTPUT="$TMPDIR/output.pdf"
+    # Make temp file locations:
+    TMPDIR=$(mktemp --tmpdir=$(dirname "$0") --directory)
+    trap "rm -vr '$TMPDIR'" EXIT
+    TMP_SOURCE="$TMPDIR/source.html"
+    TMP_COVER="$TMPDIR/cover.html"
+    TMP_STYLE="$TMPDIR/style.css"
+    TMP_TOCXSL="$TMPDIR/toc.xsl"
+    TMP_OUTPUT="$TMPDIR/output.pdf"
 
-# Write temp files:
-make_style_css >"$TMP_STYLE"
-make_cover_html "$TITLE" "$TEXT_CONFIDENTIAL" "$AUTHOR" "$FRONT_NOTES" \
-    >"$TMP_COVER"
-make_toc_xsl >"$TMP_TOCXSL"
-printf '%s' "$OTHER_PAGES" >"$TMP_SOURCE"
+    # Write temp files:
+    make_style_css >"$TMP_STYLE"
+    make_cover_html "$TITLE" "$TEXT_CONFIDENTIAL" "$AUTHOR" "$FRONT_NOTES" \
+        >"$TMP_COVER"
+    make_toc_xsl >"$TMP_TOCXSL"
+    printf '%s' "$OTHER_PAGES" >"$TMP_SOURCE"
 
-# Get to actual work:
-wkhtmltopdf \
-    --title "$TITLE" \
-    --page-size A4 \
-    --disable-external-links \
-    --disable-javascript \
-    --user-style-sheet "$TMP_STYLE" \
-    --footer-font-name 'DejaVu Sans' \
-    --footer-font-size 8 \
-    --footer-spacing 5 \
-    --footer-left "$TEXT_CONFIDENTIAL - $TITLE - $VERSION - $AUTHOR" \
-    --footer-right '[page]/[topage]' \
-    cover "$TMP_COVER" \
-    toc --xsl-style-sheet "$TMP_TOCXSL" \
-    "$TMP_SOURCE" \
-    "$TMP_OUTPUT"
-mv "$TMP_OUTPUT" "$OUTPUT"
+    # Get to actual work:
+    wkhtmltopdf \
+        --title "$TITLE" \
+        --page-size A4 \
+        --disable-external-links \
+        --disable-javascript \
+        --user-style-sheet "$TMP_STYLE" \
+        --footer-font-name 'DejaVu Sans' \
+        --footer-font-size 8 \
+        --footer-spacing 5 \
+        --footer-left "$TEXT_CONFIDENTIAL - $TITLE - $VERSION - $AUTHOR" \
+        --footer-right '[page]/[topage]' \
+        cover "$TMP_COVER" \
+        toc --xsl-style-sheet "$TMP_TOCXSL" \
+        "$TMP_SOURCE" \
+        "$TMP_OUTPUT"
+    mv "$TMP_OUTPUT" "$OUTPUT"
+}
+
+
+# Allow others to include us. That way we can test/reuse bits.
+case ${0##*/} in
+sh|bash)
+    # Just load the functions and quit.
+    ;;
+*)
+    # I assume we're called bookstack2pdf, but maybe someone renamed us.
+    _bookstack2pdf_init "$@"
+    _bookstack2pdf_main "$@"
+    ;;
+esac
