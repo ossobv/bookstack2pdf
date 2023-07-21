@@ -24,11 +24,11 @@ make_style_css() {
     # This uses the fonts we found in the source.html we looked at.
     cat <<EOF
 /*h1, h2, h3, h4, h5, body, p, li, div, span {*/
-* {
+/* * {
     font-family: "DejaVu Sans", "Ubuntu", "Roboto", sans-serif;
     /* for some reason, the non-ToC font is significantly smalle ?? */
-    font-size: 24px;
-}
+    font-size: 16px;
+}*/
 strong, em, a, b, i { margin: 0 0.1em 0 0.4em; } /* avoid "onderToegang" */
 pre {
     font-family: "Lucida Console", "DejaVu Sans Mono", "Ubuntu Mono",
@@ -213,7 +213,7 @@ get_without_first_page() {
     # We want to cut out that, except the <div class="page-content">.
     sed -e '
         /<div class="page-content">/,/<div class="page-break">/d
-        /<body>/a<div class="page-content">
+        /<body/a<div class="page-content">
     '
 }
 
@@ -240,6 +240,8 @@ _bookstack2pdf_main() {
         exit 1
     fi
 
+    local replace_toc=false
+
     FIRST_PAGE=$(printf '%s' "$SOURCE" | get_first_page)
     OTHER_PAGES=$(printf '%s' "$SOURCE" | get_without_first_page)
 
@@ -261,8 +263,20 @@ _bookstack2pdf_main() {
     make_style_css >"$TMP_STYLE"
     make_cover_html "$TITLE" "$TEXT_CONFIDENTIAL" "$AUTHOR" "$FRONT_NOTES" \
         >"$TMP_COVER"
-    make_toc_xsl >"$TMP_TOCXSL"
-    printf '%s' "$OTHER_PAGES" >"$TMP_SOURCE"
+
+    local toc_args=
+    if $replace_toc; then
+        make_toc_xsl >"$TMP_TOCXSL"
+        toc_args="toc --xsl-style-sheet $TMP_TOCXSL"
+        printf '%s' "$OTHER_PAGES" >"$TMP_SOURCE"
+    else
+        printf '%s' "$OTHER_PAGES" | sed -e '1,/^<body/!d' >"$TMP_SOURCE"
+        echo '<ul class="contents">' >>"$TMP_SOURCE"
+        printf '%s' "$FIRST_PAGE" |
+            sed -e '1,/<ul class="contents">/d' >>"$TMP_SOURCE"
+        echo '<div class="page-break"></div>' >>"$TMP_SOURCE"
+        printf '%s' "$OTHER_PAGES" >>"$TMP_SOURCE"
+    fi
 
     # Get to actual work:
     # (--dpi affects underline dashes at least..)
@@ -281,7 +295,7 @@ _bookstack2pdf_main() {
         --footer-left "$TEXT_CONFIDENTIAL - $TITLE - $VERSION - $AUTHOR" \
         --footer-right '[page]/[topage]' \
         cover "$TMP_COVER" \
-        toc --xsl-style-sheet "$TMP_TOCXSL" \
+        $toc_args \
         "$TMP_SOURCE" \
         "$TMP_OUTPUT"
     mv "$TMP_OUTPUT" "$OUTPUT"
